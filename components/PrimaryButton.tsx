@@ -1,26 +1,23 @@
 'use client';
 
-import { ReactNode } from 'react';
+import { ReactNode, ButtonHTMLAttributes } from 'react';
 import { Loader2 } from 'lucide-react';
 
-interface PrimaryButtonProps {
+interface PrimaryButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode;
-  onClick?: () => void;
-  disabled?: boolean;
   loading?: boolean;
   variant?: 'default' | 'secondary' | 'outline';
   size?: 'sm' | 'md' | 'lg';
-  className?: string;
 }
 
 export function PrimaryButton({
   children,
-  onClick,
-  disabled = false,
   loading = false,
   variant = 'default',
   size = 'md',
   className = '',
+  disabled,
+  ...props
 }: PrimaryButtonProps) {
   const baseClasses = 'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2';
   
@@ -40,7 +37,7 @@ export function PrimaryButton({
 
   return (
     <button
-      onClick={onClick}
+      {...props}
       disabled={disabled || loading}
       className={`${baseClasses} ${variantClasses[variant]} ${sizeClasses[size]} ${disabledClasses} ${className}`}
     >

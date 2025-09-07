@@ -12,76 +12,54 @@ import { ScannerItem } from '@/components/ScannerItem';
 import { AlertNotification } from '@/components/AlertNotification';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Card } from '@/components/Card';
-import { ViewMode, DashboardMetrics, Alert } from '@/lib/types';
+import { SearchModal } from '@/components/SearchModal';
+import { AlertModal } from '@/components/AlertModal';
+import { ViewMode, Asset } from '@/lib/types';
 import { 
-  generateMockPortfolioData, 
-  generateMockTrendData, 
+  useMarketData,
+  useWatchlist,
+  useTrends,
+  useAlerts,
+  usePortfolio,
+  useNotifications
+} from '@/lib/hooks';
+import { 
   generateMockChartData,
   formatCurrency 
 } from '@/lib/utils';
-import { Plus, Search, Filter, Bell } from 'lucide-react';
+import { Plus, Search, Filter, Bell, RefreshCw, Settings, X } from 'lucide-react';
 
 export default function TokenTracker() {
   const { setFrameReady } = useMiniKit();
   const [currentView, setCurrentView] = useState<ViewMode>('portfolio');
-  const [portfolioData] = useState(generateMockPortfolioData());
-  const [trendData] = useState(generateMockTrendData());
   const [chartData] = useState(generateMockChartData());
-  const [watchlist, setWatchlist] = useState(portfolioData.slice(0, 2));
-  const [alerts, setAlerts] = useState<Alert[]>([
-    {
-      alertId: '1',
-      userId: 'user1',
-      assetId: 'bitcoin',
-      type: 'price_above',
-      value: 50000,
-      status: 'active',
-      createdAt: Date.now() - 86400000,
-    },
-    {
-      alertId: '2',
-      userId: 'user1',
-      assetId: 'ethereum',
-      type: 'price_below',
-      value: 2500,
-      status: 'triggered',
-      createdAt: Date.now() - 3600000,
-    },
-  ]);
+  
+  // Modal states
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const [alertModalOpen, setAlertModalOpen] = useState(false);
+  const [searchMode, setSearchMode] = useState<'watchlist' | 'portfolio'>('watchlist');
 
-  // Calculate dashboard metrics
-  const metrics: DashboardMetrics = {
-    totalValue: portfolioData.reduce((sum, asset) => sum + asset.currentValue, 0),
-    totalPnL: portfolioData.reduce((sum, asset) => sum + asset.profitLoss, 0),
-    totalPnLPercentage: portfolioData.reduce((sum, asset) => sum + asset.profitLossPercentage, 0) / portfolioData.length,
-    topGainer: portfolioData.reduce((max, asset) => 
-      asset.profitLossPercentage > max.change ? 
-      { symbol: asset.symbol, change: asset.profitLossPercentage } : max, 
-      { symbol: '', change: -Infinity }
-    ),
-    topLoser: portfolioData.reduce((min, asset) => 
-      asset.profitLossPercentage < min.change ? 
-      { symbol: asset.symbol, change: asset.profitLossPercentage } : min, 
-      { symbol: '', change: Infinity }
-    ),
-  };
+  // Custom hooks for data management
+  const { assets: marketData, loading: marketLoading, refreshData } = useMarketData();
+  const { watchlistAssets, addToWatchlist, removeFromWatchlist, isInWatchlist } = useWatchlist();
+  const { trends, loading: trendsLoading, refreshTrends } = useTrends();
+  const { alerts, dismissAlert } = useAlerts();
+  const { portfolio, metrics } = usePortfolio();
+  const { requestPermission } = useNotifications();
 
   useEffect(() => {
     setFrameReady();
-  }, [setFrameReady]);
+    // Request notification permission on app start
+    requestPermission();
+  }, [setFrameReady, requestPermission]);
 
-  const handleAddToWatchlist = (asset: any) => {
-    if (!watchlist.find(item => item.symbol === asset.symbol)) {
-      setWatchlist([...watchlist, asset]);
-    }
+  const handleOpenSearchModal = (mode: 'watchlist' | 'portfolio') => {
+    setSearchMode(mode);
+    setSearchModalOpen(true);
   };
 
-  const handleRemoveFromWatchlist = (symbol: string) => {
-    setWatchlist(watchlist.filter(item => item.symbol !== symbol));
-  };
-
-  const handleDismissAlert = (alertId: string) => {
-    setAlerts(alerts.filter(alert => alert.alertId !== alertId));
+  const handleAddToWatchlistFromSearch = (asset: Asset) => {
+    addToWatchlist(asset.assetId);
   };
 
   const renderPortfolioView = () => (
@@ -92,15 +70,25 @@ export default function TokenTracker() {
           <h1 className="text-3xl font-bold gradient-text mb-2">Portfolio</h1>
           <p className="text-gray-400">Track your crypto investments</p>
         </div>
-        <Wallet>
-          <ConnectWallet>
-            <Name />
-          </ConnectWallet>
-        </Wallet>
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={refreshData}
+            disabled={marketLoading}
+            className="p-2 hover:bg-white hover:bg-opacity-10 rounded-lg transition-colors duration-200"
+            title="Refresh data"
+          >
+            <RefreshCw size={20} className={`text-gray-400 ${marketLoading ? 'animate-spin' : ''}`} />
+          </button>
+          <Wallet>
+            <ConnectWallet>
+              <Name />
+            </ConnectWallet>
+          </Wallet>
+        </div>
       </div>
 
       {/* Metrics Grid */}
-      <MetricsGrid metrics={metrics} />
+      {metrics && <MetricsGrid metrics={metrics} />}
 
       {/* Portfolio Chart */}
       <Card variant="glass" className="p-6">
@@ -118,20 +106,37 @@ export default function TokenTracker() {
       <Card variant="glass" className="p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-white">Your Assets</h2>
-          <PrimaryButton size="sm">
+          <PrimaryButton size="sm" onClick={() => handleOpenSearchModal('portfolio')}>
             <Plus size={16} className="mr-2" />
             Add Asset
           </PrimaryButton>
         </div>
         <div className="space-y-3">
-          {portfolioData.map((asset) => (
-            <AssetRow
-              key={asset.symbol}
-              asset={asset}
-              variant="performance"
-              onClick={() => console.log('Asset clicked:', asset.symbol)}
-            />
-          ))}
+          {portfolio.length > 0 ? (
+            portfolio.map((entry) => (
+              <AssetRow
+                key={`${entry.userId}-${entry.assetId}`}
+                asset={{
+                  symbol: entry.assetId.toUpperCase(),
+                  name: entry.assetId,
+                  currentPrice: entry.currentValue / entry.quantity,
+                  profitLoss: entry.profitLoss,
+                  profitLossPercentage: entry.profitLossPercentage,
+                  currentValue: entry.currentValue,
+                  quantity: entry.quantity,
+                }}
+                variant="performance"
+                onClick={() => console.log('Asset clicked:', entry.assetId)}
+              />
+            ))
+          ) : (
+            <div className="text-center py-8">
+              <p className="text-gray-400 mb-4">No assets in your portfolio yet</p>
+              <PrimaryButton onClick={() => handleOpenSearchModal('portfolio')}>
+                Add Your First Asset
+              </PrimaryButton>
+            </div>
+          )}
         </div>
       </Card>
     </div>
@@ -145,44 +150,68 @@ export default function TokenTracker() {
           <h1 className="text-3xl font-bold gradient-text mb-2">Watchlist</h1>
           <p className="text-gray-400">Monitor potential investments</p>
         </div>
-        <PrimaryButton>
+        <PrimaryButton onClick={() => handleOpenSearchModal('watchlist')}>
           <Plus size={16} className="mr-2" />
           Add Token
         </PrimaryButton>
       </div>
 
-      {/* Search Bar */}
+      {/* Quick Actions */}
       <Card variant="glass" className="p-4">
-        <div className="flex items-center space-x-3">
-          <Search size={20} className="text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search tokens..."
-            className="flex-1 bg-transparent text-white placeholder-gray-400 focus:outline-none"
-          />
-          <Filter size={20} className="text-gray-400" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <Search size={20} className="text-gray-400" />
+            <span className="text-gray-400">Quick add tokens to your watchlist</span>
+          </div>
+          <button
+            onClick={() => handleOpenSearchModal('watchlist')}
+            className="text-purple-400 hover:text-purple-300 transition-colors duration-200"
+          >
+            Search Tokens
+          </button>
         </div>
       </Card>
 
       {/* Watchlist Items */}
       <Card variant="glass" className="p-6">
-        <h2 className="text-xl font-bold text-white mb-4">Watched Tokens</h2>
-        <div className="space-y-3">
-          {watchlist.map((asset) => (
-            <AssetRow
-              key={asset.symbol}
-              asset={asset}
-              variant="watchlist"
-              onClick={() => console.log('Watchlist item clicked:', asset.symbol)}
-            />
-          ))}
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold text-white">Watched Tokens</h2>
+          <span className="text-sm text-gray-400">{watchlistAssets.length} tokens</span>
         </div>
-        {watchlist.length === 0 && (
-          <div className="text-center py-8">
-            <p className="text-gray-400 mb-4">No tokens in your watchlist yet</p>
-            <PrimaryButton>Add Your First Token</PrimaryButton>
-          </div>
-        )}
+        <div className="space-y-3">
+          {watchlistAssets.length > 0 ? (
+            watchlistAssets.map((asset) => (
+              <div key={asset.assetId} className="relative">
+                <AssetRow
+                  asset={{
+                    symbol: asset.symbol,
+                    name: asset.name,
+                    currentPrice: asset.currentPrice,
+                    priceChange24h: asset.priceChange24h,
+                    image: asset.image,
+                  }}
+                  variant="watchlist"
+                  onClick={() => console.log('Watchlist item clicked:', asset.symbol)}
+                />
+                <button
+                  onClick={() => removeFromWatchlist(asset.assetId)}
+                  className="absolute right-4 top-1/2 transform -translate-y-1/2 p-1 text-gray-400 hover:text-red-400 transition-colors duration-200"
+                  title="Remove from watchlist"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            ))
+          ) : (
+            <div className="text-center py-8">
+              <Search size={48} className="mx-auto text-gray-600 mb-4" />
+              <p className="text-gray-400 mb-4">No tokens in your watchlist yet</p>
+              <PrimaryButton onClick={() => handleOpenSearchModal('watchlist')}>
+                Add Your First Token
+              </PrimaryButton>
+            </div>
+          )}
+        </div>
       </Card>
     </div>
   );
@@ -195,23 +224,70 @@ export default function TokenTracker() {
           <h1 className="text-3xl font-bold gradient-text mb-2">Trends</h1>
           <p className="text-gray-400">Discover emerging opportunities</p>
         </div>
-        <PrimaryButton variant="secondary">
-          <Filter size={16} className="mr-2" />
-          Filters
-        </PrimaryButton>
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={refreshTrends}
+            disabled={trendsLoading}
+            className="p-2 hover:bg-white hover:bg-opacity-10 rounded-lg transition-colors duration-200"
+            title="Refresh trends"
+          >
+            <RefreshCw size={20} className={`text-gray-400 ${trendsLoading ? 'animate-spin' : ''}`} />
+          </button>
+          <PrimaryButton variant="secondary">
+            <Filter size={16} className="mr-2" />
+            Filters
+          </PrimaryButton>
+        </div>
       </div>
 
       {/* Trending Tokens */}
       <Card variant="glass" className="p-6">
-        <h2 className="text-xl font-bold text-white mb-4">Trending Now</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold text-white">Trending Now</h2>
+          {trendsLoading && (
+            <div className="flex items-center space-x-2 text-sm text-gray-400">
+              <RefreshCw size={16} className="animate-spin" />
+              <span>Updating trends...</span>
+            </div>
+          )}
+        </div>
         <div className="space-y-3">
-          {trendData.map((trend) => (
-            <ScannerItem
-              key={trend.scanId}
-              trend={trend}
-              onClick={() => console.log('Trend clicked:', trend.tokenSymbol)}
-            />
-          ))}
+          {trends.length > 0 ? (
+            trends.map((trend) => (
+              <div key={trend.scanId} className="relative">
+                <ScannerItem
+                  trend={trend}
+                  onClick={() => console.log('Trend clicked:', trend.tokenSymbol)}
+                />
+                <button
+                  onClick={() => addToWatchlist(trend.tokenSymbol.toLowerCase())}
+                  disabled={isInWatchlist(trend.tokenSymbol.toLowerCase())}
+                  className={`absolute right-4 top-1/2 transform -translate-y-1/2 p-2 rounded-lg transition-all duration-200 ${
+                    isInWatchlist(trend.tokenSymbol.toLowerCase())
+                      ? 'bg-green-500 bg-opacity-20 text-green-400 cursor-not-allowed'
+                      : 'bg-purple-500 bg-opacity-20 text-purple-400 hover:bg-opacity-30'
+                  }`}
+                  title={isInWatchlist(trend.tokenSymbol.toLowerCase()) ? 'Already in watchlist' : 'Add to watchlist'}
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
+            ))
+          ) : (
+            <div className="text-center py-8">
+              <div className="w-16 h-16 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Bell size={24} className="text-white" />
+              </div>
+              <p className="text-gray-400 mb-4">
+                {trendsLoading ? 'Loading trends...' : 'No trends available'}
+              </p>
+              {!trendsLoading && (
+                <PrimaryButton onClick={refreshTrends} variant="secondary">
+                  Refresh Trends
+                </PrimaryButton>
+              )}
+            </div>
+          )}
         </div>
       </Card>
 
@@ -220,68 +296,89 @@ export default function TokenTracker() {
         <Card variant="glass" className="p-4">
           <h3 className="font-bold text-white mb-2">Volume Spikes</h3>
           <p className="text-sm text-gray-400 mb-3">Tokens with unusual trading activity</p>
-          <div className="text-2xl font-bold text-yellow-400">12</div>
+          <div className="text-2xl font-bold text-yellow-400">
+            {trends.filter(t => t.trendType === 'volume_spike').length}
+          </div>
         </Card>
         <Card variant="glass" className="p-4">
           <h3 className="font-bold text-white mb-2">Social Buzz</h3>
           <p className="text-sm text-gray-400 mb-3">Tokens trending on social media</p>
-          <div className="text-2xl font-bold text-blue-400">8</div>
-        </Card>
-      </div>
-    </div>
-  );
-
-  const renderAlertsView = () => (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold gradient-text mb-2">Alerts</h1>
-          <p className="text-gray-400">Manage your notifications</p>
-        </div>
-        <PrimaryButton>
-          <Bell size={16} className="mr-2" />
-          New Alert
-        </PrimaryButton>
-      </div>
-
-      {/* Active Alerts */}
-      <Card variant="glass" className="p-6">
-        <h2 className="text-xl font-bold text-white mb-4">Your Alerts</h2>
-        <div className="space-y-3">
-          {alerts.map((alert) => (
-            <AlertNotification
-              key={alert.alertId}
-              alert={alert}
-              onDismiss={() => handleDismissAlert(alert.alertId)}
-            />
-          ))}
-        </div>
-        {alerts.length === 0 && (
-          <div className="text-center py-8">
-            <p className="text-gray-400 mb-4">No active alerts</p>
-            <PrimaryButton>Create Your First Alert</PrimaryButton>
+          <div className="text-2xl font-bold text-blue-400">
+            {trends.filter(t => t.trendType === 'social_mentions').length}
           </div>
-        )}
-      </Card>
-
-      {/* Alert Statistics */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card variant="glass" className="p-4 text-center">
-          <div className="text-2xl font-bold text-green-400 mb-1">5</div>
-          <p className="text-sm text-gray-400">Active Alerts</p>
-        </Card>
-        <Card variant="glass" className="p-4 text-center">
-          <div className="text-2xl font-bold text-yellow-400 mb-1">2</div>
-          <p className="text-sm text-gray-400">Triggered Today</p>
-        </Card>
-        <Card variant="glass" className="p-4 text-center">
-          <div className="text-2xl font-bold text-purple-400 mb-1">12</div>
-          <p className="text-sm text-gray-400">Total This Week</p>
         </Card>
       </div>
     </div>
   );
+
+  const renderAlertsView = () => {
+    const activeAlerts = alerts.filter(alert => alert.status === 'active');
+    const triggeredAlerts = alerts.filter(alert => alert.status === 'triggered');
+    const todayTriggered = triggeredAlerts.filter(alert => 
+      Date.now() - alert.createdAt < 86400000
+    );
+
+    return (
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold gradient-text mb-2">Alerts</h1>
+            <p className="text-gray-400">Manage your notifications</p>
+          </div>
+          <PrimaryButton onClick={() => setAlertModalOpen(true)}>
+            <Bell size={16} className="mr-2" />
+            New Alert
+          </PrimaryButton>
+        </div>
+
+        {/* Active Alerts */}
+        <Card variant="glass" className="p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-white">Your Alerts</h2>
+            <span className="text-sm text-gray-400">{alerts.length} total</span>
+          </div>
+          <div className="space-y-3">
+            {alerts.length > 0 ? (
+              alerts.map((alert) => (
+                <AlertNotification
+                  key={alert.alertId}
+                  alert={alert}
+                  onDismiss={() => dismissAlert(alert.alertId)}
+                />
+              ))
+            ) : (
+              <div className="text-center py-8">
+                <div className="w-16 h-16 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Bell size={24} className="text-white" />
+                </div>
+                <p className="text-gray-400 mb-4">No alerts created yet</p>
+                <PrimaryButton onClick={() => setAlertModalOpen(true)}>
+                  Create Your First Alert
+                </PrimaryButton>
+              </div>
+            )}
+          </div>
+        </Card>
+
+        {/* Alert Statistics */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Card variant="glass" className="p-4 text-center">
+            <div className="text-2xl font-bold text-green-400 mb-1">{activeAlerts.length}</div>
+            <p className="text-sm text-gray-400">Active Alerts</p>
+          </Card>
+          <Card variant="glass" className="p-4 text-center">
+            <div className="text-2xl font-bold text-yellow-400 mb-1">{todayTriggered.length}</div>
+            <p className="text-sm text-gray-400">Triggered Today</p>
+          </Card>
+          <Card variant="glass" className="p-4 text-center">
+            <div className="text-2xl font-bold text-purple-400 mb-1">{triggeredAlerts.length}</div>
+            <p className="text-sm text-gray-400">Total Triggered</p>
+          </Card>
+        </div>
+      </div>
+    );
+  };
 
   const renderCurrentView = () => {
     switch (currentView) {
@@ -299,8 +396,24 @@ export default function TokenTracker() {
   };
 
   return (
-    <AppShell currentView={currentView} onViewChange={setCurrentView}>
-      {renderCurrentView()}
-    </AppShell>
+    <>
+      <AppShell currentView={currentView} onViewChange={setCurrentView}>
+        {renderCurrentView()}
+      </AppShell>
+
+      {/* Modals */}
+      <SearchModal
+        isOpen={searchModalOpen}
+        onClose={() => setSearchModalOpen(false)}
+        onAddToWatchlist={handleAddToWatchlistFromSearch}
+        mode={searchMode}
+        title={searchMode === 'watchlist' ? 'Add to Watchlist' : 'Add to Portfolio'}
+      />
+
+      <AlertModal
+        isOpen={alertModalOpen}
+        onClose={() => setAlertModalOpen(false)}
+      />
+    </>
   );
 }
