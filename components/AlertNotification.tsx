@@ -1,11 +1,12 @@
 'use client';
 
-import { Alert } from '@/lib/types';
+import { Alert, Asset } from '@/lib/types';
 import { ALERT_TYPES } from '@/lib/constants';
 import { Bell, TrendingUp, Volume2, DollarSign, X } from 'lucide-react';
 
 interface AlertNotificationProps {
   alert: Alert;
+  asset?: Asset;
   onDismiss?: () => void;
 }
 
