@@ -10,7 +10,11 @@ export const metadata: Metadata = {
   description: 'Your all-in-one crypto portfolio tracker and trend scanner on Base',
   keywords: ['crypto', 'portfolio', 'tracker', 'base', 'blockchain'],
   authors: [{ name: 'TokenTracker Team' }],
-  viewport: 'width=device-width, initial-scale=1',
+};
+
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
 };
 
 export default function RootLayout({
