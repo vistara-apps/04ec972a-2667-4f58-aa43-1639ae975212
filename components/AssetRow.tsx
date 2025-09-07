@@ -7,19 +7,22 @@ interface AssetRowProps {
   asset: {
     symbol: string;
     name: string;
-    currentValue: number;
-    profitLoss: number;
-    profitLossPercentage: number;
+    currentValue?: number;
+    profitLoss?: number;
+    profitLossPercentage?: number;
     image?: string;
     quantity?: number;
     currentPrice?: number;
+    priceChange24h?: number;
   };
   variant?: 'default' | 'watchlist' | 'performance';
   onClick?: () => void;
+  onRemove?: () => void;
 }
 
 export function AssetRow({ asset, variant = 'default', onClick }: AssetRowProps) {
-  const percentageColor = getPercentageColor(asset.profitLossPercentage);
+  const percentageChange = asset.profitLossPercentage ?? asset.priceChange24h ?? 0;
+  const percentageColor = getPercentageColor(percentageChange);
 
   return (
     <div className="asset-row" onClick={onClick}>
@@ -39,15 +42,20 @@ export function AssetRow({ asset, variant = 'default', onClick }: AssetRowProps)
 
         <div className="text-right">
           <p className="font-semibold text-white">
-            {formatCurrency(asset.currentValue)}
+            {variant === 'watchlist' && asset.currentPrice 
+              ? formatCurrency(asset.currentPrice)
+              : formatCurrency(asset.currentValue || 0)
+            }
           </p>
           <div className="flex items-center space-x-2">
             <span className={`text-sm font-medium ${percentageColor}`}>
-              {formatPercentage(asset.profitLossPercentage)}
+              {formatPercentage(percentageChange)}
             </span>
-            <span className={`text-xs ${percentageColor}`}>
-              {formatCurrency(asset.profitLoss)}
-            </span>
+            {asset.profitLoss !== undefined && (
+              <span className={`text-xs ${percentageColor}`}>
+                {formatCurrency(asset.profitLoss)}
+              </span>
+            )}
           </div>
           {variant === 'performance' && asset.currentPrice && (
             <p className="text-xs text-gray-500">
